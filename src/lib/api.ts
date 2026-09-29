@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+const API_BASE = process.env.API_URL || 'http://localhost:5000';
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -57,6 +57,17 @@ export async function updateCompanyStatus(id: string, isActive: boolean) {
   return apiFetch(`/api/platform/companies/${id}/status`, {
     method: 'PUT',
     body: JSON.stringify({ isActive }),
+  });
+}
+
+export async function deleteCompany(id: string) {
+  return apiFetch<{
+    id: string;
+    name: string;
+    usersDeleted: number;
+    companyDeleted: boolean;
+  }>(`/api/platform/companies/${id}`, {
+    method: 'DELETE',
   });
 }
 
@@ -145,4 +156,111 @@ export async function updateCompanySubscription(id: string, body: UpdateCompanyS
       body: JSON.stringify(body),
     }
   );
+}
+
+export interface PlatformUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  companyId: string | null;
+  companyName: string;
+}
+
+export async function getPlatformUsers(query = '', limit = 200) {
+  const qs = new URLSearchParams();
+  if (query.trim()) qs.set('q', query.trim());
+  qs.set('limit', String(limit));
+  return apiFetch<PlatformUser[]>(`/api/platform/users?${qs.toString()}`) as Promise<{
+    success: boolean;
+    data?: PlatformUser[];
+    message?: string;
+    meta?: { total: number; activeTotal: number; returned: number };
+  }>;
+}
+
+export async function sendPlatformNotification(body: {
+  title: string;
+  message: string;
+  audience: 'all' | 'selected';
+  userIds?: string[];
+  type?: 'info' | 'success' | 'warning' | 'error';
+}) {
+  return apiFetch<{ sent: number; failed: number; total: number; audience: string }>(
+    '/api/platform/notifications',
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+}
+
+export async function sendPlatformEmail(body: {
+  subject: string;
+  message: string;
+  audience: 'all' | 'selected';
+  userIds?: string[];
+  actionUrl?: string;
+  actionText?: string;
+}) {
+  return apiFetch<{ sent: number; failed: number; skipped: number; total: number; audience: string }>(
+    '/api/platform/emails',
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+}
+
+// ─── Company Storage Usage ────────────────────────────────────────────────────
+
+export interface StorageBreakdownItem {
+  table: string;
+  rowCount: number;
+  storageBytes: number;
+  storageMB: number;
+}
+
+export interface CompanyStorageEntry {
+  companyId: string;
+  companyName: string;
+  storageBytes: number;
+  storageMB: number;
+  storageGB: number;
+  breakdown?: StorageBreakdownItem[];
+}
+
+export interface CompanyStorageReport {
+  success: boolean;
+  calculationMethod: 'estimated';
+  calculationNote: string;
+  computedAt: string;
+  fromCache: boolean;
+  cacheExpiresInSeconds: number;
+  companies: CompanyStorageEntry[];
+  totalStorageBytes: number;
+  totalStorageMB: number;
+  totalStorageGB: number;
+  message?: string;
+}
+
+export async function getCompanyStorageUsage(opts?: {
+  breakdown?: boolean;
+  forceRefresh?: boolean;
+}): Promise<CompanyStorageReport> {
+  const qs = new URLSearchParams();
+  if (opts?.breakdown === false) qs.set('breakdown', 'false');
+  if (opts?.forceRefresh) qs.set('forceRefresh', 'true');
+  const query = qs.toString() ? `?${qs.toString()}` : '';
+  return apiFetch<CompanyStorageReport>(
+    `/api/admin/company-storage-usage${query}`
+  ) as Promise<CompanyStorageReport>;
+}
+
+export async function invalidateStorageCache() {
+  return apiFetch('/api/admin/company-storage-usage/invalidate-cache', {
+    method: 'POST',
+  });
 }

@@ -8,6 +8,7 @@ import ClientSubscriptionPanel from "@/components/ClientSubscriptionPanel";
 import {
   getCompany,
   updateCompanyStatus,
+  deleteCompany,
   type CompanyDetail,
 } from "@/lib/api";
 
@@ -29,6 +30,7 @@ export default function ClientDetailPage() {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!clientId) return;
@@ -69,6 +71,38 @@ export default function ClientDetailPage() {
     } else {
       setError((res as { message?: string }).message || "Failed to update status");
     }
+  }
+
+  async function handleDeleteCompany() {
+    if (!detail || deleting) return;
+
+    const userCount = detail.users?.length ?? 0;
+    const ok = window.confirm(
+      `Delete company "${detail.name}" permanently?\n\nThis will permanently delete:\n• The company\n• All ${userCount} user account(s)\n• All related ERP / POS / accounting data\n\nThis cannot be undone.`
+    );
+    if (!ok) return;
+
+    const typed = window.prompt(
+      `Type the company name exactly to confirm deletion:\n\n${detail.name}`
+    );
+    if (typed === null) return;
+    if (typed.trim() !== detail.name.trim()) {
+      setError("Company name did not match. Deletion cancelled.");
+      return;
+    }
+
+    setDeleting(true);
+    setError("");
+    setActionMessage("");
+    const res = await deleteCompany(detail.id);
+    setDeleting(false);
+
+    if (res.success) {
+      router.push("/dashboard/clients");
+      return;
+    }
+
+    setError((res as { message?: string }).message || "Failed to delete company");
   }
 
   if (loading) {
@@ -137,7 +171,7 @@ export default function ClientDetailPage() {
             <button
               type="button"
               onClick={handleToggleStatus}
-              disabled={toggling}
+              disabled={toggling || deleting}
               className={`rounded-lg px-3 py-2 text-sm font-semibold disabled:opacity-60 ${
                 detail.isActive
                   ? "border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
@@ -145,6 +179,14 @@ export default function ClientDetailPage() {
               }`}
             >
               {toggling ? "…" : detail.isActive ? "Deactivate client" : "Activate client"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteCompany}
+              disabled={deleting || toggling}
+              className="rounded-lg border border-red-600 bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {deleting ? "Deleting…" : "Delete company"}
             </button>
           </div>
         }
@@ -201,6 +243,26 @@ export default function ClientDetailPage() {
         onMessage={setActionMessage}
         onError={setError}
       />
+
+      <Card
+        title="Danger zone"
+        subtitle="Permanently remove this client organization from the platform"
+        className="mb-6 border-red-200"
+      >
+        <p className="mb-4 text-sm text-zinc-600">
+          Deleting <span className="font-semibold text-zinc-900">{detail.name}</span> will
+          permanently erase the company, all of its users, and all related ERP / POS /
+          accounting data. This cannot be undone.
+        </p>
+        <button
+          type="button"
+          onClick={handleDeleteCompany}
+          disabled={deleting || toggling}
+          className="rounded-lg border border-red-600 bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+        >
+          {deleting ? "Deleting company…" : "Delete company permanently"}
+        </button>
+      </Card>
 
       <Card title={`Users (${detail.users.length})`} subtitle="Accounts in this client organization">
         <div className="overflow-x-auto">
