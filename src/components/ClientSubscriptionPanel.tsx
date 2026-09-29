@@ -33,7 +33,7 @@ export default function ClientSubscriptionPanel({
   const [licensedBranches, setLicensedBranches] = useState(
     String(detail.licensedBranches ?? cap?.licensedBranches ?? 1)
   );
-  const [trialDays, setTrialDays] = useState("14");
+  const [trialDays, setTrialDays] = useState("5");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function ClientSubscriptionPanel({
       subscriptionStatus: plan === "none" ? "expired" : "active",
     };
     if (plan === "trial") {
-      body.trialDaysRemaining = Math.max(1, parseInt(trialDays, 10) || 14);
+      body.trialDaysRemaining = Math.max(1, parseInt(trialDays, 10) || 5);
     }
     if (plan === "monthly" || plan === "yearly") {
       body.billingCycle = plan;
@@ -121,7 +121,7 @@ export default function ClientSubscriptionPanel({
             onChange={(e) => setPlan(e.target.value as SubscriptionPlanType)}
             className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm"
           >
-            <option value="trial">Trial (free)</option>
+            <option value="trial">Trial (5 days free)</option>
             <option value="monthly">Monthly (paid)</option>
             <option value="yearly">Yearly (paid)</option>
             <option value="none">Revoke access</option>
@@ -168,7 +168,7 @@ export default function ClientSubscriptionPanel({
 
         {plan === "trial" && (
           <label className="block text-sm">
-            <span className="mb-1 block font-medium text-zinc-700">Trial days</span>
+            <span className="mb-1 block font-medium text-zinc-700">Trial days (default 5)</span>
             <input
               type="number"
               min={1}

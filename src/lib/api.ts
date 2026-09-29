@@ -1,4 +1,8 @@
-const API_BASE = process.env.API_URL || 'http://localhost:5000';
+const API_BASE = process.env.API_URL;
+
+if (!API_BASE) {
+  console.error('API_URL is not set. Add it to .env.local and restart the dev server.');
+}
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -9,6 +13,10 @@ async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<{ success: boolean; data?: T; message?: string }> {
+  if (!API_BASE) {
+    return { success: false, message: 'API_URL is not configured' };
+  }
+
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -96,7 +104,9 @@ export interface CompanyRow {
   licensedUsers?: number;
   licensedBranches?: number;
   billingCycle?: string | null;
+  trialStartDate?: string | null;
   trialEndDate: string | null;
+  subscriptionStartDate?: string | null;
   subscriptionEndDate: string | null;
   createdAt: string;
   _count: { users: number };

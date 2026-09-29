@@ -16,6 +16,172 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" });
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DEFAULT_TRIAL_DAYS = 5;
+
+function daysBetween(from: number, to: number) {
+  return Math.floor((to - from) / MS_PER_DAY);
+}
+
+type PeriodInfo = {
+  usedDays: number;
+  totalDays: number | null;
+  remainingDays: number | null;
+  label: string;
+};
+
+function getPeriodInfo(c: CompanyRow): PeriodInfo | null {
+  const plan = (c.subscriptionPlan || "").toLowerCase();
+  const now = Date.now();
+
+  let startRaw: string | null | undefined;
+  let endRaw: string | null | undefined;
+
+  if (plan === "trial") {
+    startRaw = c.trialStartDate || c.createdAt;
+    endRaw = c.trialEndDate;
+  } else if (plan === "monthly" || plan === "yearly") {
+    startRaw = c.subscriptionStartDate || c.createdAt;
+    endRaw = c.subscriptionEndDate;
+  } else {
+    return null;
+  }
+
+  if (!startRaw && !endRaw) return null;
+
+  const start = startRaw ? new Date(startRaw).getTime() : null;
+  const end = endRaw ? new Date(endRaw).getTime() : null;
+  const usedDays = start != null ? Math.max(0, daysBetween(start, now)) : 0;
+
+  if (start != null && end != null) {
+    const totalDays = Math.max(1, daysBetween(start, end));
+    const remainingDays = daysBetween(now, end);
+    const clampedUsed = Math.min(usedDays, totalDays);
+    return {
+      usedDays: clampedUsed,
+      totalDays,
+      remainingDays,
+      label:
+        remainingDays < 0
+          ? `${clampedUsed} of ${totalDays} days used · expired`
+          : `${clampedUsed} of ${totalDays} days used`,
+    };
+  }
+
+  if (start != null) {
+    const totalDays = plan === "trial" ? DEFAULT_TRIAL_DAYS : null;
+    return {
+      usedDays,
+      totalDays,
+      remainingDays: totalDays != null ? Math.max(0, totalDays - usedDays) : null,
+      label: totalDays != null ? `${usedDays} of ${totalDays} days used` : `${usedDays} days used`,
+    };
+  }
+
+  if (end != null) {
+    const remainingDays = daysBetween(now, end);
+    const totalDays = plan === "trial" ? DEFAULT_TRIAL_DAYS : null;
+    const usedDaysGuess = totalDays != null ? Math.max(0, totalDays - Math.max(0, remainingDays)) : 0;
+    return {
+      usedDays: usedDaysGuess,
+      totalDays,
+      remainingDays,
+      label:
+        totalDays != null
+          ? `${usedDaysGuess} of ${totalDays} days used`
+          : remainingDays >= 0
+            ? `${remainingDays}d left`
+            : "Expired",
+    };
+  }
+
+  return null;
+}
+
+function formatPeriod(c: CompanyRow): string | undefined {
+  const info = getPeriodInfo(c);
+  if (!info) return undefined;
+
+  const plan = (c.subscriptionPlan || "").toLowerCase();
+  const startRaw =
+    plan === "trial"
+      ? c.trialStartDate || c.createdAt
+      : c.subscriptionStartDate || c.createdAt;
+  const endRaw = plan === "trial" ? c.trialEndDate : c.subscriptionEndDate;
+
+  const parts = [info.label];
+  if (info.remainingDays != null) {
+    if (info.remainingDays < 0) parts.push(`${Math.abs(info.remainingDays)}d overdue`);
+    else if (info.remainingDays === 0) parts.push("ends today");
+    else parts.push(`${info.remainingDays}d left`);
+  }
+  if (startRaw && endRaw) {
+    parts.push(`${fmtDate(startRaw)} → ${fmtDate(endRaw)}`);
+  }
+  return parts.join(" · ");
+}
+
+type BillingTone = "indigo" | "emerald" | "amber" | "red" | "zinc" | "sky";
+
+function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; detail?: string } {
+  const plan = (c.subscriptionPlan || "").toLowerCase();
+  const status = (c.subscriptionStatus || "").toLowerCase();
+  const now = Date.now();
+  const trialEnd = c.trialEndDate ? new Date(c.trialEndDate).getTime() : null;
+  const subEnd = c.subscriptionEndDate ? new Date(c.subscriptionEndDate).getTime() : null;
+  const period = formatPeriod(c);
+
+  if (plan === "monthly" || plan === "yearly") {
+    const expired =
+      status === "expired" || status === "cancelled" || (subEnd != null && subEnd < now);
+    if (expired) {
+      return {
+        label: "Subscription Expired",
+        tone: "red",
+        detail: period || (subEnd ? `Ended ${fmtDate(c.subscriptionEndDate!)}` : undefined),
+      };
+    }
+    return {
+      label: plan === "yearly" ? "Yearly Active" : "Monthly Active",
+      tone: "indigo",
+      detail: period || "On subscription",
+    };
+  }
+
+  if (plan === "trial") {
+    const expired =
+      status === "expired" || status === "cancelled" || (trialEnd != null && trialEnd < now);
+    if (expired) {
+      return {
+        label: "Trial Expired",
+        tone: "red",
+        detail: period || (trialEnd ? `Ended ${fmtDate(c.trialEndDate!)}` : undefined),
+      };
+    }
+    if (status !== "active" && status) {
+      return {
+        label: "Trial Inactive",
+        tone: "amber",
+        detail: period || status,
+      };
+    }
+    return {
+      label: "Trial Active",
+      tone: "amber",
+      detail: period || (trialEnd ? `Until ${fmtDate(c.trialEndDate!)}` : undefined),
+    };
+  }
+
+  if (plan === "none" || !plan) {
+    return { label: "No Plan", tone: "zinc" };
+  }
+
+  return {
+    label: status === "active" ? `${plan} · Active` : `${plan} · ${status || "Unknown"}`,
+    tone: status === "active" ? "sky" : "zinc",
+  };
+}
+
 export default function ClientsPage() {
   const router = useRouter();
   const [clients, setClients] = useState<CompanyRow[]>([]);
@@ -84,6 +250,11 @@ export default function ClientsPage() {
 
   const activeCount = clients.filter((c) => c.isActive).length;
   const inactiveCount = clients.length - activeCount;
+  const trialActiveCount = clients.filter((c) => getBillingStatus(c).label === "Trial Active").length;
+  const subscribedCount = clients.filter((c) => {
+    const label = getBillingStatus(c).label;
+    return label === "Monthly Active" || label === "Yearly Active";
+  }).length;
 
   return (
     <main className="flex-1 p-5 md:p-8">
@@ -110,18 +281,23 @@ export default function ClientsPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-zinc-500">Total Clients</p>
           <p className="mt-2 text-2xl font-bold text-zinc-900">{clients.length}</p>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-zinc-500">Active</p>
+          <p className="text-sm text-zinc-500">Account Active</p>
           <p className="mt-2 text-2xl font-bold text-emerald-600">{activeCount}</p>
+          <p className="mt-1 text-xs text-zinc-400">{inactiveCount} inactive</p>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-zinc-500">Inactive / Suspended</p>
-          <p className="mt-2 text-2xl font-bold text-red-500">{inactiveCount}</p>
+          <p className="text-sm text-zinc-500">Trial Active</p>
+          <p className="mt-2 text-2xl font-bold text-amber-600">{trialActiveCount}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-zinc-500">On Subscription</p>
+          <p className="mt-2 text-2xl font-bold text-indigo-600">{subscribedCount}</p>
         </div>
       </div>
 
@@ -176,6 +352,7 @@ export default function ClientsPage() {
                   <th className="px-3 py-3 font-medium">Plan</th>
                   <th className="px-3 py-3 font-medium">Users</th>
                   <th className="px-3 py-3 font-medium">Joined</th>
+                  <th className="px-3 py-3 font-medium">Days Used</th>
                   <th className="px-3 py-3 font-medium">Status</th>
                   <th className="px-3 py-3 text-right font-medium">Action</th>
                 </tr>
@@ -183,61 +360,96 @@ export default function ClientsPage() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-zinc-400">
+                    <td colSpan={7} className="px-3 py-10 text-center text-zinc-400">
                       No clients found.
                     </td>
                   </tr>
                 )}
-                {filtered.map((c) => (
-                  <tr
-                    key={c.id}
-                    className="border-b border-zinc-100 hover:bg-zinc-50 cursor-pointer"
-                    onClick={() => router.push(`/dashboard/clients/${c.id}`)}
-                  >
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={c.name} />
-                        <div>
-                          <p className="font-medium text-zinc-900">{c.name}</p>
-                          <p className="text-xs text-zinc-500">{c.email || "—"}</p>
+                {filtered.map((c) => {
+                  const billing = getBillingStatus(c);
+                  const period = getPeriodInfo(c);
+                  return (
+                    <tr
+                      key={c.id}
+                      className="border-b border-zinc-100 hover:bg-zinc-50 cursor-pointer"
+                      onClick={() => router.push(`/dashboard/clients/${c.id}`)}
+                    >
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar name={c.name} />
+                          <div>
+                            <p className="font-medium text-zinc-900">{c.name}</p>
+                            <p className="text-xs text-zinc-500">{c.email || "—"}</p>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div>
-                        <span className="capitalize text-zinc-700">{c.subscriptionPlan}</span>
-                        {c.productTier && (
-                          <p className="text-xs text-zinc-400 capitalize">{c.productTier.replace("_", " + ")}</p>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div>
+                          <span className="capitalize text-zinc-700">{c.subscriptionPlan}</span>
+                          {c.productTier && (
+                            <p className="text-xs text-zinc-400 capitalize">{c.productTier.replace("_", " + ")}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-zinc-700 font-medium">
+                        {c._count.users}
+                        {c.licensedUsers != null && (
+                          <span className="text-zinc-400 font-normal"> / {c.licensedUsers}</span>
                         )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-zinc-700 font-medium">
-                      {c._count.users}
-                      {c.licensedUsers != null && (
-                        <span className="text-zinc-400 font-normal"> / {c.licensedUsers}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-zinc-500">{fmtDate(c.createdAt)}</td>
-                    <td className="px-3 py-3">
-                      <Badge tone={c.isActive ? "emerald" : "red"}>
-                        {c.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleToggle(c.id, c.name, c.isActive)}
-                        disabled={toggling === c.id}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60 ${
-                          c.isActive
-                            ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
-                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                        }`}
-                      >
-                        {toggling === c.id ? "…" : c.isActive ? "Deactivate" : "Activate"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-3 py-3 text-zinc-500">{fmtDate(c.createdAt)}</td>
+                      <td className="px-3 py-3">
+                        {period ? (
+                          <div>
+                            <p className="font-semibold text-zinc-900">
+                              {period.usedDays}
+                              {period.totalDays != null ? (
+                                <span className="font-normal text-zinc-500"> / {period.totalDays} days</span>
+                              ) : (
+                                <span className="font-normal text-zinc-500"> days</span>
+                              )}
+                            </p>
+                            {period.remainingDays != null && (
+                              <p className="text-[11px] text-zinc-400">
+                                {period.remainingDays < 0
+                                  ? `${Math.abs(period.remainingDays)}d overdue`
+                                  : period.remainingDays === 0
+                                    ? "Ends today"
+                                    : `${period.remainingDays}d left`}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-zinc-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-col items-start gap-1.5 max-w-[260px]">
+                          <Badge tone={c.isActive ? "emerald" : "red"}>
+                            {c.isActive ? "Account Active" : "Account Inactive"}
+                          </Badge>
+                          <Badge tone={billing.tone}>{billing.label}</Badge>
+                          {billing.detail && (
+                            <p className="text-[11px] leading-snug text-zinc-500">{billing.detail}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleToggle(c.id, c.name, c.isActive)}
+                          disabled={toggling === c.id}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                            c.isActive
+                              ? "bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
+                              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                          }`}
+                        >
+                          {toggling === c.id ? "…" : c.isActive ? "Deactivate" : "Activate"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
