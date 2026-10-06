@@ -4,28 +4,134 @@ if (!API_BASE) {
   console.error('API_URL is not set. Add it to .env.local and restart the dev server.');
 }
 
+type ApiOptions = RequestInit & { _retry?: boolean; skipAuth?: boolean };
+
+function cleanToken(token: string | null | undefined): string | null {
+  if (!token) return null;
+  return token.trim().replace(/"/g, '').replace(/\s/g, '') || null;
+}
+
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('admin_token');
+  return cleanToken(localStorage.getItem('admin_token'));
+}
+
+function getRefreshToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return cleanToken(localStorage.getItem('admin_refresh_token'));
+}
+
+export function setAdminTokens(token: string, refreshToken?: string | null) {
+  if (typeof window === 'undefined') return;
+  const access = cleanToken(token);
+  if (access) localStorage.setItem('admin_token', access);
+  const refresh = cleanToken(refreshToken);
+  if (refresh) localStorage.setItem('admin_refresh_token', refresh);
+}
+
+export function clearAdminSession() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('admin_token');
+  localStorage.removeItem('admin_refresh_token');
+  localStorage.removeItem('admin_user');
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+  clearAdminSession();
+  if (!window.location.pathname.startsWith('/login')) {
+    window.location.replace('/login');
+  }
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  if (!API_BASE) return false;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/users/refresh-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      const json = await res.json().catch(() => ({}));
+      const nextToken = json?.token || json?.data?.token;
+      const nextRefresh = json?.refreshToken || json?.data?.refreshToken;
+      if (res.ok && json?.success && nextToken) {
+        setAdminTokens(nextToken, nextRefresh || refreshToken);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+/** Try to restore session from refresh token when access token is missing/expired. */
+export async function ensureAdminSession(): Promise<boolean> {
+  if (getToken()) return true;
+  if (!getRefreshToken()) return false;
+  return refreshAccessToken();
+}
+
+function isAuthExemptPath(path: string) {
+  return (
+    path.startsWith('/api/users/login') ||
+    path.startsWith('/api/users/verify-login-otp') ||
+    path.startsWith('/api/users/refresh-token')
+  );
 }
 
 async function apiFetch<T = unknown>(
   path: string,
-  options: RequestInit = {}
-): Promise<{ success: boolean; data?: T; message?: string }> {
+  options: ApiOptions = {}
+): Promise<{ success: boolean; data?: T; message?: string; token?: string; refreshToken?: string }> {
   if (!API_BASE) {
     return { success: false, message: 'API_URL is not configured' };
   }
 
-  const token = getToken();
+  const { _retry, skipAuth, ...fetchOptions } = options;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
+    ...(fetchOptions.headers as Record<string, string> | undefined),
   };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!skipAuth && !isAuthExemptPath(path)) {
+    const token = getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...fetchOptions, headers });
+  } catch {
+    return { success: false, message: 'Network error. Please try again.' };
+  }
+
   const json = await res.json().catch(() => ({}));
+
+  const unauthorized = res.status === 401;
+
+  if (unauthorized && !_retry && !skipAuth && !isAuthExemptPath(path)) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      return apiFetch<T>(path, { ...options, _retry: true });
+    }
+    redirectToLogin();
+    return { success: false, message: json?.message || 'Session expired. Please login again.' };
+  }
+
   console.log(`API ${path} response:`, JSON.stringify(json, null, 2));
   return json;
 }
@@ -35,15 +141,20 @@ export async function loginWithPassword(email: string, password: string) {
   return apiFetch('/api/users/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
+    skipAuth: true,
   });
 }
 
 export async function verifyLoginOtp(email: string, otp: string) {
   return apiFetch<{ token: string; refreshToken: string; user: Record<string, unknown> }>(
     '/api/users/verify-login-otp',
-    { method: 'POST', body: JSON.stringify({ email, otp }) }
-  ).then(res => {
-    console.log("Verify Login OTP raw response:", res);
+    {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+      skipAuth: true,
+    }
+  ).then((res) => {
+    console.log('Verify Login OTP raw response:', res);
     return res;
   });
 }

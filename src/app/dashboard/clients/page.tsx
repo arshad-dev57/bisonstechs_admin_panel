@@ -123,7 +123,42 @@ function formatPeriod(c: CompanyRow): string | undefined {
 
 type BillingTone = "indigo" | "emerald" | "amber" | "red" | "zinc" | "sky";
 
-function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; detail?: string } {
+type BillingKey =
+  | "trial_active"
+  | "trial_inactive"
+  | "trial_expired"
+  | "monthly_active"
+  | "yearly_active"
+  | "subscription_expired"
+  | "no_plan"
+  | "other";
+
+type BillingStatus = { key: BillingKey; label: string; tone: BillingTone; detail?: string };
+
+/** Lower = higher in the default list (active trials first, expired last). */
+const BILLING_SORT_RANK: Record<BillingKey, number> = {
+  trial_active: 0,
+  monthly_active: 1,
+  yearly_active: 1,
+  trial_inactive: 2,
+  no_plan: 3,
+  other: 3,
+  trial_expired: 4,
+  subscription_expired: 4,
+};
+
+const PLAN_FILTER_OPTIONS: { value: "all" | BillingKey; label: string }[] = [
+  { value: "all", label: "All plans" },
+  { value: "trial_active", label: "Trial Active" },
+  { value: "trial_inactive", label: "Trial Inactive" },
+  { value: "trial_expired", label: "Trial Expired" },
+  { value: "monthly_active", label: "Monthly Active" },
+  { value: "yearly_active", label: "Yearly Active" },
+  { value: "subscription_expired", label: "Subscription Expired" },
+  { value: "no_plan", label: "No Plan" },
+];
+
+function getBillingStatus(c: CompanyRow): BillingStatus {
   const plan = (c.subscriptionPlan || "").toLowerCase();
   const status = (c.subscriptionStatus || "").toLowerCase();
   const now = Date.now();
@@ -136,12 +171,14 @@ function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; de
       status === "expired" || status === "cancelled" || (subEnd != null && subEnd < now);
     if (expired) {
       return {
+        key: "subscription_expired",
         label: "Subscription Expired",
         tone: "red",
         detail: period || (subEnd ? `Ended ${fmtDate(c.subscriptionEndDate!)}` : undefined),
       };
     }
     return {
+      key: plan === "yearly" ? "yearly_active" : "monthly_active",
       label: plan === "yearly" ? "Yearly Active" : "Monthly Active",
       tone: "indigo",
       detail: period || "On subscription",
@@ -153,6 +190,7 @@ function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; de
       status === "expired" || status === "cancelled" || (trialEnd != null && trialEnd < now);
     if (expired) {
       return {
+        key: "trial_expired",
         label: "Trial Expired",
         tone: "red",
         detail: period || (trialEnd ? `Ended ${fmtDate(c.trialEndDate!)}` : undefined),
@@ -160,12 +198,14 @@ function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; de
     }
     if (status !== "active" && status) {
       return {
+        key: "trial_inactive",
         label: "Trial Inactive",
         tone: "amber",
         detail: period || status,
       };
     }
     return {
+      key: "trial_active",
       label: "Trial Active",
       tone: "amber",
       detail: period || (trialEnd ? `Until ${fmtDate(c.trialEndDate!)}` : undefined),
@@ -173,13 +213,21 @@ function getBillingStatus(c: CompanyRow): { label: string; tone: BillingTone; de
   }
 
   if (plan === "none" || !plan) {
-    return { label: "No Plan", tone: "zinc" };
+    return { key: "no_plan", label: "No Plan", tone: "zinc" };
   }
 
   return {
+    key: "other",
     label: status === "active" ? `${plan} · Active` : `${plan} · ${status || "Unknown"}`,
     tone: status === "active" ? "sky" : "zinc",
   };
+}
+
+function remainingSortKey(c: CompanyRow): number {
+  const plan = (c.subscriptionPlan || "").toLowerCase();
+  const endRaw = plan === "trial" ? c.trialEndDate : c.subscriptionEndDate;
+  if (!endRaw) return Number.POSITIVE_INFINITY;
+  return new Date(endRaw).getTime();
 }
 
 export default function ClientsPage() {
@@ -189,7 +237,8 @@ export default function ClientsPage() {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"All" | "Active" | "Inactive">("All");
+  const [accountFilter, setAccountFilter] = useState<"all" | "active" | "inactive">("all");
+  const [planFilter, setPlanFilter] = useState<"all" | BillingKey>("all");
   const [toggling, setToggling] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -209,19 +258,36 @@ export default function ClientsPage() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    return clients.filter((c) => {
-      const matchesFilter =
-        filter === "All" ||
-        (filter === "Active" && c.isActive) ||
-        (filter === "Inactive" && !c.isActive);
-      const q = query.toLowerCase();
+    const q = query.toLowerCase().trim();
+    const list = clients.filter((c) => {
+      const matchesAccount =
+        accountFilter === "all" ||
+        (accountFilter === "active" && c.isActive) ||
+        (accountFilter === "inactive" && !c.isActive);
+      const billing = getBillingStatus(c);
+      const matchesPlan = planFilter === "all" || billing.key === planFilter;
       const matchesQuery =
+        !q ||
         c.name.toLowerCase().includes(q) ||
         (c.email || "").toLowerCase().includes(q) ||
-        (c.businessType || "").toLowerCase().includes(q);
-      return matchesFilter && matchesQuery;
+        (c.businessType || "").toLowerCase().includes(q) ||
+        (c.subscriptionPlan || "").toLowerCase().includes(q) ||
+        billing.label.toLowerCase().includes(q);
+      return matchesAccount && matchesPlan && matchesQuery;
     });
-  }, [clients, query, filter]);
+
+    // Active trials first → paid active → inactive → expired at the bottom.
+    // Within the same rank, soonest-ending period first, then newest join.
+    return list.slice().sort((a, b) => {
+      const rankA = BILLING_SORT_RANK[getBillingStatus(a).key];
+      const rankB = BILLING_SORT_RANK[getBillingStatus(b).key];
+      if (rankA !== rankB) return rankA - rankB;
+      const endA = remainingSortKey(a);
+      const endB = remainingSortKey(b);
+      if (endA !== endB) return endA - endB;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [clients, query, accountFilter, planFilter]);
 
   async function handleToggle(id: string, name: string, currentlyActive: boolean) {
     if (currentlyActive) {
@@ -250,11 +316,15 @@ export default function ClientsPage() {
 
   const activeCount = clients.filter((c) => c.isActive).length;
   const inactiveCount = clients.length - activeCount;
-  const trialActiveCount = clients.filter((c) => getBillingStatus(c).label === "Trial Active").length;
+  const trialActiveCount = clients.filter((c) => getBillingStatus(c).key === "trial_active").length;
+  const trialExpiredCount = clients.filter((c) => getBillingStatus(c).key === "trial_expired").length;
   const subscribedCount = clients.filter((c) => {
-    const label = getBillingStatus(c).label;
-    return label === "Monthly Active" || label === "Yearly Active";
+    const key = getBillingStatus(c).key;
+    return key === "monthly_active" || key === "yearly_active";
   }).length;
+
+  const selectClass =
+    "rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 outline-none focus:border-indigo-400";
 
   return (
     <main className="flex-1 p-5 md:p-8">
@@ -281,7 +351,7 @@ export default function ClientsPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-zinc-500">Total Clients</p>
           <p className="mt-2 text-2xl font-bold text-zinc-900">{clients.length}</p>
@@ -294,6 +364,10 @@ export default function ClientsPage() {
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-zinc-500">Trial Active</p>
           <p className="mt-2 text-2xl font-bold text-amber-600">{trialActiveCount}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <p className="text-sm text-zinc-500">Trial Expired</p>
+          <p className="mt-2 text-2xl font-bold text-red-600">{trialExpiredCount}</p>
         </div>
         <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-zinc-500">On Subscription</p>
@@ -311,7 +385,7 @@ export default function ClientsPage() {
       )}
 
       <Card>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full max-w-xs">
             <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-zinc-400">
               {searchIcon}
@@ -323,20 +397,51 @@ export default function ClientsPage() {
               className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400 focus:bg-white"
             />
           </div>
-          <div className="flex gap-2">
-            {(["All", "Active", "Inactive"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                  filter === f ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                }`}
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-zinc-500">
+              <span className="whitespace-nowrap">Account</span>
+              <select
+                value={accountFilter}
+                onChange={(e) => setAccountFilter(e.target.value as "all" | "active" | "inactive")}
+                className={selectClass}
               >
-                {f}
+                <option value="all">All accounts</option>
+                <option value="active">Account Active</option>
+                <option value="inactive">Account Inactive</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-500">
+              <span className="whitespace-nowrap">Plan / Trial</span>
+              <select
+                value={planFilter}
+                onChange={(e) => setPlanFilter(e.target.value as "all" | BillingKey)}
+                className={selectClass}
+              >
+                {PLAN_FILTER_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(accountFilter !== "all" || planFilter !== "all") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAccountFilter("all");
+                  setPlanFilter("all");
+                }}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700"
+              >
+                Clear filters
               </button>
-            ))}
+            )}
           </div>
         </div>
+        <p className="mb-3 text-xs text-zinc-400">
+          Sorted by trial flow: active trials first, then paid plans, expired trials at the bottom.
+          {filtered.length !== clients.length ? ` Showing ${filtered.length} of ${clients.length}.` : ""}
+        </p>
 
         <div className="overflow-x-auto">
           {loading ? (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { loginWithPassword, verifyLoginOtp } from "@/lib/api";
+import { loginWithPassword, setAdminTokens, verifyLoginOtp } from "@/lib/api";
 
 export default function LoginPage() {
   const [step, setStep] = useState<"credentials" | "otp">("credentials");
@@ -54,10 +54,8 @@ export default function LoginPage() {
         return;
       }
       
-      localStorage.setItem("admin_token", token);
-      if (refreshToken) localStorage.setItem("admin_refresh_token", refreshToken);
+      setAdminTokens(token, refreshToken);
       if (user) localStorage.setItem("admin_user", JSON.stringify(user));
-      
       setSuccess(true);
       console.log("Token set, redirecting to dashboard...");
       

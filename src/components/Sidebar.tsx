@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { clearAdminSession } from "@/lib/api";
 
 const nav = [
   {
@@ -100,9 +101,7 @@ export default function Sidebar() {
   }, []);
 
   function handleLogout() {
-    localStorage.removeItem("admin_token");
-    localStorage.removeItem("admin_refresh_token");
-    localStorage.removeItem("admin_user");
+    clearAdminSession();
     window.location.replace("/login");
   }
 

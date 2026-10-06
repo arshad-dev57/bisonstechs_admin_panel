@@ -2,18 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
+import { clearAdminSession, ensureAdminSession } from "@/lib/api";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      window.location.replace("/login");
-    } else {
+    let cancelled = false;
+    (async () => {
+      const ok = await ensureAdminSession();
+      if (cancelled) return;
+      if (!ok) {
+        clearAdminSession();
+        window.location.replace("/login");
+        return;
+      }
       setReady(true);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!ready) {
