@@ -202,12 +202,32 @@ export async function getUserSubscriptionHistory(userId: string) {
   return apiFetch(`/api/subscription/history?userId=${userId}`);
 }
 
+export interface CompanyAdmin {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  contactNo: string;
+  country: string;
+  address: string;
+  organizationName: string;
+  websiteLink: string;
+  role: string;
+  isActive: boolean;
+  createdAt: string;
+  businessDetails?: Record<string, unknown> | null;
+}
+
 export interface CompanyRow {
   id: string;
   name: string;
   email: string | null;
   phone: string | null;
+  address?: string | null;
   businessType: string | null;
+  taxRegistrationNumber?: string | null;
+  website?: string | null;
   isActive: boolean;
   subscriptionPlan: string;
   subscriptionStatus: string;
@@ -221,6 +241,7 @@ export interface CompanyRow {
   subscriptionEndDate: string | null;
   createdAt: string;
   _count: { users: number };
+  admin?: CompanyAdmin | null;
 }
 
 export interface CompanyCapacity {
@@ -247,13 +268,21 @@ export interface CompanyUser {
   firstName: string;
   lastName: string;
   email: string;
+  phone?: string;
+  contactNo?: string;
+  country?: string;
+  address?: string;
+  organizationName?: string;
+  websiteLink?: string;
   role: string;
   isActive: boolean;
   createdAt: string;
+  businessDetails?: Record<string, unknown> | null;
 }
 
 export interface CompanyDetail extends CompanyRow {
   users: CompanyUser[];
+  admin?: CompanyAdmin | null;
   capacity?: CompanyCapacity;
 }
 

@@ -20,6 +20,26 @@ function fmtDate(iso: string) {
   });
 }
 
+function DetailField({ label, value }: { label: string; value?: string | null }) {
+  const display = (value || "").trim();
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</p>
+      <p className="mt-1 text-sm text-zinc-900 break-words">{display || "—"}</p>
+    </div>
+  );
+}
+
+function businessDetailValue(
+  details: Record<string, unknown> | null | undefined,
+  key: string
+): string {
+  if (!details || typeof details !== "object") return "";
+  const raw = details[key];
+  if (raw == null) return "";
+  return String(raw).trim();
+}
+
 export default function ClientDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -138,6 +158,16 @@ export default function ClientDetailPage() {
   }
 
   const cap = detail.capacity;
+  const admin = detail.admin || detail.users.find((u) => u.role === "admin") || detail.users[0] || null;
+  const adminPhone = admin?.contactNo || admin?.phone || detail.phone || "";
+  const adminAddress = admin?.address || detail.address || "";
+  const adminWebsite = admin?.websiteLink || detail.website || "";
+  const taxReg =
+    detail.taxRegistrationNumber ||
+    businessDetailValue(admin?.businessDetails, "taxRegistrationNumber");
+  const industry = businessDetailValue(admin?.businessDetails, "industry");
+  const registeredBusinessType =
+    detail.businessType || businessDetailValue(admin?.businessDetails, "businessType");
 
   return (
     <main className="flex-1 p-5 md:p-8">
@@ -151,7 +181,11 @@ export default function ClientDetailPage() {
 
       <PageHeader
         title={detail.name}
-        subtitle={detail.email || "No email on file"}
+        subtitle={
+          admin
+            ? `${admin.firstName} ${admin.lastName} · ${admin.country || "—"}${adminPhone ? ` · ${adminPhone}` : ""}`
+            : detail.email || "No email on file"
+        }
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -237,6 +271,36 @@ export default function ClientDetailPage() {
         </div>
       </div>
 
+      <Card
+        title="Admin & registration details"
+        subtitle="Information captured when this client registered on the platform"
+        className="mb-6"
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <DetailField
+            label="Admin name"
+            value={admin ? `${admin.firstName} ${admin.lastName}` : null}
+          />
+          <DetailField label="Admin email" value={admin?.email || detail.email} />
+          <DetailField label="Country" value={admin?.country} />
+          <DetailField label="Phone / contact" value={adminPhone} />
+          <DetailField label="Company email" value={detail.email} />
+          <DetailField label="Company phone" value={detail.phone} />
+          <DetailField label="Organization" value={admin?.organizationName || detail.name} />
+          <DetailField label="Business type" value={registeredBusinessType} />
+          <DetailField label="Industry" value={industry} />
+          <DetailField label="Tax registration #" value={taxReg} />
+          <DetailField label="Website" value={adminWebsite} />
+          <DetailField
+            label="Registered"
+            value={admin?.createdAt ? fmtDate(admin.createdAt) : fmtDate(detail.createdAt)}
+          />
+          <div className="sm:col-span-2 lg:col-span-3">
+            <DetailField label="Address" value={adminAddress} />
+          </div>
+        </div>
+      </Card>
+
       <ClientSubscriptionPanel
         detail={detail}
         onUpdated={setDetail}
@@ -271,6 +335,8 @@ export default function ClientDetailPage() {
               <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500">
                 <th className="px-3 py-3 font-medium">Name</th>
                 <th className="px-3 py-3 font-medium">Email</th>
+                <th className="px-3 py-3 font-medium">Country</th>
+                <th className="px-3 py-3 font-medium">Phone</th>
                 <th className="px-3 py-3 font-medium">Role</th>
                 <th className="px-3 py-3 font-medium">Status</th>
                 <th className="px-3 py-3 font-medium">Joined</th>
@@ -279,7 +345,7 @@ export default function ClientDetailPage() {
             <tbody>
               {detail.users.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-10 text-center text-zinc-400">
+                  <td colSpan={7} className="px-3 py-10 text-center text-zinc-400">
                     No users in this client.
                   </td>
                 </tr>
@@ -295,6 +361,10 @@ export default function ClientDetailPage() {
                     </div>
                   </td>
                   <td className="px-3 py-3 text-zinc-500">{u.email}</td>
+                  <td className="px-3 py-3 text-zinc-600">{u.country || "—"}</td>
+                  <td className="px-3 py-3 text-zinc-600">
+                    {u.contactNo || u.phone || "—"}
+                  </td>
                   <td className="px-3 py-3 capitalize text-zinc-600">{u.role}</td>
                   <td className="px-3 py-3">
                     <Badge tone={u.isActive ? "emerald" : "red"}>

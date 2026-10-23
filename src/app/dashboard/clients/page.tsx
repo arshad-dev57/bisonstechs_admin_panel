@@ -266,12 +266,21 @@ export default function ClientsPage() {
         (accountFilter === "inactive" && !c.isActive);
       const billing = getBillingStatus(c);
       const matchesPlan = planFilter === "all" || billing.key === planFilter;
+      const adminName = c.admin
+        ? `${c.admin.firstName} ${c.admin.lastName}`.toLowerCase()
+        : "";
       const matchesQuery =
         !q ||
         c.name.toLowerCase().includes(q) ||
         (c.email || "").toLowerCase().includes(q) ||
+        (c.phone || "").toLowerCase().includes(q) ||
         (c.businessType || "").toLowerCase().includes(q) ||
         (c.subscriptionPlan || "").toLowerCase().includes(q) ||
+        adminName.includes(q) ||
+        (c.admin?.email || "").toLowerCase().includes(q) ||
+        (c.admin?.phone || "").toLowerCase().includes(q) ||
+        (c.admin?.contactNo || "").toLowerCase().includes(q) ||
+        (c.admin?.country || "").toLowerCase().includes(q) ||
         billing.label.toLowerCase().includes(q);
       return matchesAccount && matchesPlan && matchesQuery;
     });
@@ -454,6 +463,7 @@ export default function ClientsPage() {
               <thead>
                 <tr className="border-b border-zinc-200 text-xs uppercase tracking-wide text-zinc-500">
                   <th className="px-3 py-3 font-medium">Client</th>
+                  <th className="px-3 py-3 font-medium">Admin / Contact</th>
                   <th className="px-3 py-3 font-medium">Plan</th>
                   <th className="px-3 py-3 font-medium">Users</th>
                   <th className="px-3 py-3 font-medium">Joined</th>
@@ -465,7 +475,7 @@ export default function ClientsPage() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-10 text-center text-zinc-400">
+                    <td colSpan={8} className="px-3 py-10 text-center text-zinc-400">
                       No clients found.
                     </td>
                   </tr>
@@ -473,6 +483,8 @@ export default function ClientsPage() {
                 {filtered.map((c) => {
                   const billing = getBillingStatus(c);
                   const period = getPeriodInfo(c);
+                  const admin = c.admin;
+                  const adminPhone = admin?.contactNo || admin?.phone || c.phone || "";
                   return (
                     <tr
                       key={c.id}
@@ -485,8 +497,32 @@ export default function ClientsPage() {
                           <div>
                             <p className="font-medium text-zinc-900">{c.name}</p>
                             <p className="text-xs text-zinc-500">{c.email || "—"}</p>
+                            {c.businessType && (
+                              <p className="text-[11px] text-zinc-400">{c.businessType}</p>
+                            )}
                           </div>
                         </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        {admin ? (
+                          <div className="max-w-[220px]">
+                            <p className="font-medium text-zinc-900">
+                              {admin.firstName} {admin.lastName}
+                            </p>
+                            <p className="text-xs text-zinc-500 truncate">{admin.email}</p>
+                            <p className="mt-0.5 text-xs text-zinc-600">
+                              {admin.country || "—"}
+                              {adminPhone ? ` · ${adminPhone}` : ""}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="max-w-[220px]">
+                            <p className="text-xs text-zinc-500">{c.email || "—"}</p>
+                            <p className="mt-0.5 text-xs text-zinc-600">
+                              {c.phone || "—"}
+                            </p>
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <div>
