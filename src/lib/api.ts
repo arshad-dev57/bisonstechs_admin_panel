@@ -172,6 +172,12 @@ export async function getCompany(id: string) {
   return apiFetch(`/api/platform/companies/${id}`);
 }
 
+export async function getCompanyActivity(id: string, limit = 80) {
+  return apiFetch<CompanyActivityPayload>(
+    `/api/platform/companies/${id}/activity?limit=${limit}`
+  );
+}
+
 export async function updateCompanyStatus(id: string, isActive: boolean) {
   return apiFetch(`/api/platform/companies/${id}/status`, {
     method: 'PUT',
@@ -215,6 +221,7 @@ export interface CompanyAdmin {
   websiteLink: string;
   role: string;
   isActive: boolean;
+  lastActiveAt?: string | null;
   createdAt: string;
   businessDetails?: Record<string, unknown> | null;
 }
@@ -240,8 +247,52 @@ export interface CompanyRow {
   subscriptionStartDate?: string | null;
   subscriptionEndDate: string | null;
   createdAt: string;
+  lastActiveAt?: string | null;
   _count: { users: number };
   admin?: CompanyAdmin | null;
+}
+
+export interface CompanyActivitySummary {
+  lastActiveAt: string | null;
+  eventsToday: number;
+  eventsWeek: number;
+  activeUsersToday: number;
+  activeUsersWeek: number;
+  totalUsers: number;
+}
+
+export interface CompanyActivityUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  isActive: boolean;
+  lastActiveAt: string | null;
+  createdAt: string;
+}
+
+export interface CompanyActivityEvent {
+  id: string;
+  action: string;
+  source: string;
+  path: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  } | null;
+}
+
+export interface CompanyActivityPayload {
+  companyId: string;
+  companyName: string;
+  summary: CompanyActivitySummary;
+  users: CompanyActivityUser[];
+  events: CompanyActivityEvent[];
 }
 
 export interface CompanyCapacity {
@@ -276,6 +327,7 @@ export interface CompanyUser {
   websiteLink?: string;
   role: string;
   isActive: boolean;
+  lastActiveAt?: string | null;
   createdAt: string;
   businessDetails?: Record<string, unknown> | null;
 }
@@ -283,6 +335,7 @@ export interface CompanyUser {
 export interface CompanyDetail extends CompanyRow {
   users: CompanyUser[];
   admin?: CompanyAdmin | null;
+  lastActiveAt?: string | null;
   capacity?: CompanyCapacity;
 }
 

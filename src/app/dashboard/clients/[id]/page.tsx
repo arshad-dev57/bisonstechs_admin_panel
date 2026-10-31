@@ -7,8 +7,10 @@ import { Avatar, Badge, Breadcrumbs, Card, PageHeader } from "@/components/ui";
 import ClientSubscriptionPanel from "@/components/ClientSubscriptionPanel";
 import {
   getCompany,
+  getCompanyActivity,
   updateCompanyStatus,
   deleteCompany,
+  type CompanyActivityPayload,
   type CompanyDetail,
 } from "@/lib/api";
 
@@ -18,6 +20,40 @@ function fmtDate(iso: string) {
     month: "short",
     day: "numeric",
   });
+}
+
+function fmtDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-PK", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function fmtRelative(iso?: string | null) {
+  if (!iso) return "Never";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "Never";
+  const diffMs = Date.now() - t;
+  if (diffMs < 0) return "Just now";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `${days}d ago`;
+  return fmtDate(iso);
+}
+
+function actionLabel(action: string) {
+  const a = (action || "").toLowerCase();
+  if (a === "login") return "Logged in";
+  if (a === "page_view") return "Opened page";
+  if (a === "active") return "Using app";
+  return action || "Activity";
 }
 
 function DetailField({ label, value }: { label: string; value?: string | null }) {
@@ -46,7 +82,9 @@ export default function ClientDetailPage() {
   const clientId = String(params.id || "");
 
   const [detail, setDetail] = useState<CompanyDetail | null>(null);
+  const [activity, setActivity] = useState<CompanyActivityPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activityLoading, setActivityLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [toggling, setToggling] = useState(false);
@@ -55,15 +93,25 @@ export default function ClientDetailPage() {
   const load = useCallback(async () => {
     if (!clientId) return;
     setLoading(true);
+    setActivityLoading(true);
     setError("");
-    const res = await getCompany(clientId);
+    const [res, activityRes] = await Promise.all([
+      getCompany(clientId),
+      getCompanyActivity(clientId, 100),
+    ]);
     if (res.success && res.data) {
       setDetail(res.data as CompanyDetail);
     } else {
       setError((res as { message?: string }).message || "Failed to load client");
       setDetail(null);
     }
+    if (activityRes.success && activityRes.data) {
+      setActivity(activityRes.data as CompanyActivityPayload);
+    } else {
+      setActivity(null);
+    }
     setLoading(false);
+    setActivityLoading(false);
   }, [clientId]);
 
   useEffect(() => {
@@ -237,7 +285,7 @@ export default function ClientDetailPage() {
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Status</p>
           <div className="mt-2">
@@ -267,6 +315,17 @@ export default function ClientDetailPage() {
           <p className="mt-2 font-semibold text-zinc-900">{fmtDate(detail.createdAt)}</p>
           {detail.businessType && (
             <p className="text-xs text-zinc-500">{detail.businessType}</p>
+          )}
+        </div>
+        <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Last used app</p>
+          <p className="mt-2 font-semibold text-zinc-900">
+            {fmtRelative(activity?.summary.lastActiveAt || detail.lastActiveAt)}
+          </p>
+          {(activity?.summary.lastActiveAt || detail.lastActiveAt) && (
+            <p className="text-xs text-zinc-500">
+              {fmtDate(activity?.summary.lastActiveAt || detail.lastActiveAt!)}
+            </p>
           )}
         </div>
       </div>
@@ -299,6 +358,104 @@ export default function ClientDetailPage() {
             <DetailField label="Address" value={adminAddress} />
           </div>
         </div>
+      </Card>
+
+      <Card
+        title="App usage activity"
+        subtitle="When users from this client open and use your web app"
+        className="mb-6"
+      >
+        {activityLoading ? (
+          <div className="flex items-center gap-2 py-8 text-sm text-zinc-400">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+            Loading activity…
+          </div>
+        ) : (
+          <>
+            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Active today</p>
+                <p className="mt-1 text-lg font-bold text-zinc-900">
+                  {activity?.summary.activeUsersToday ?? 0}
+                  <span className="text-sm font-normal text-zinc-400">
+                    {" "}
+                    / {activity?.summary.totalUsers ?? detail.users.length}
+                  </span>
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Active this week</p>
+                <p className="mt-1 text-lg font-bold text-zinc-900">
+                  {activity?.summary.activeUsersWeek ?? 0}
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Events today</p>
+                <p className="mt-1 text-lg font-bold text-zinc-900">
+                  {activity?.summary.eventsToday ?? 0}
+                </p>
+              </div>
+              <div className="rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3">
+                <p className="text-[11px] uppercase tracking-wide text-zinc-400">Events this week</p>
+                <p className="mt-1 text-lg font-bold text-zinc-900">
+                  {activity?.summary.eventsWeek ?? 0}
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-zinc-100">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                    <th className="px-3 py-2.5 font-medium">When</th>
+                    <th className="px-3 py-2.5 font-medium">User</th>
+                    <th className="px-3 py-2.5 font-medium">Action</th>
+                    <th className="px-3 py-2.5 font-medium">Source</th>
+                    <th className="px-3 py-2.5 font-medium">Page</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(!activity?.events || activity.events.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-10 text-center text-zinc-400">
+                        No app usage yet. Activity appears after this client logs into the web app.
+                      </td>
+                    </tr>
+                  )}
+                  {(activity?.events || []).map((e) => (
+                    <tr key={e.id} className="border-b border-zinc-100">
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <p className="font-medium text-zinc-800">{fmtRelative(e.createdAt)}</p>
+                        <p className="text-[11px] text-zinc-400">{fmtDateTime(e.createdAt)}</p>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <p className="font-medium text-zinc-900">{e.user?.name || "Unknown"}</p>
+                        <p className="text-xs text-zinc-500">{e.user?.email || "—"}</p>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge
+                          tone={
+                            e.action === "login"
+                              ? "indigo"
+                              : e.action === "page_view"
+                                ? "sky"
+                                : "emerald"
+                          }
+                        >
+                          {actionLabel(e.action)}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5 capitalize text-zinc-600">{e.source || "web"}</td>
+                      <td className="px-3 py-2.5 text-zinc-500 font-mono text-xs">
+                        {e.path || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </Card>
 
       <ClientSubscriptionPanel
@@ -338,6 +495,7 @@ export default function ClientDetailPage() {
                 <th className="px-3 py-3 font-medium">Country</th>
                 <th className="px-3 py-3 font-medium">Phone</th>
                 <th className="px-3 py-3 font-medium">Role</th>
+                <th className="px-3 py-3 font-medium">Last active</th>
                 <th className="px-3 py-3 font-medium">Status</th>
                 <th className="px-3 py-3 font-medium">Joined</th>
               </tr>
@@ -345,7 +503,7 @@ export default function ClientDetailPage() {
             <tbody>
               {detail.users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center text-zinc-400">
+                  <td colSpan={8} className="px-3 py-10 text-center text-zinc-400">
                     No users in this client.
                   </td>
                 </tr>
@@ -366,6 +524,12 @@ export default function ClientDetailPage() {
                     {u.contactNo || u.phone || "—"}
                   </td>
                   <td className="px-3 py-3 capitalize text-zinc-600">{u.role}</td>
+                  <td className="px-3 py-3">
+                    <p className="font-medium text-zinc-800">{fmtRelative(u.lastActiveAt)}</p>
+                    {u.lastActiveAt && (
+                      <p className="text-[11px] text-zinc-400">{fmtDate(u.lastActiveAt)}</p>
+                    )}
+                  </td>
                   <td className="px-3 py-3">
                     <Badge tone={u.isActive ? "emerald" : "red"}>
                       {u.isActive ? "Active" : "Inactive"}

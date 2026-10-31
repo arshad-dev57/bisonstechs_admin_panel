@@ -16,6 +16,22 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-PK", { year: "numeric", month: "short", day: "numeric" });
 }
 
+function fmtRelative(iso?: string | null) {
+  if (!iso) return "Never";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "Never";
+  const diffMs = Date.now() - t;
+  if (diffMs < 0) return "Just now";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `${days}d ago`;
+  return fmtDate(iso);
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_TRIAL_DAYS = 5;
 
@@ -467,6 +483,7 @@ export default function ClientsPage() {
                   <th className="px-3 py-3 font-medium">Plan</th>
                   <th className="px-3 py-3 font-medium">Users</th>
                   <th className="px-3 py-3 font-medium">Joined</th>
+                  <th className="px-3 py-3 font-medium">Last used</th>
                   <th className="px-3 py-3 font-medium">Days Used</th>
                   <th className="px-3 py-3 font-medium">Status</th>
                   <th className="px-3 py-3 text-right font-medium">Action</th>
@@ -475,7 +492,7 @@ export default function ClientsPage() {
               <tbody>
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-zinc-400">
+                    <td colSpan={9} className="px-3 py-10 text-center text-zinc-400">
                       No clients found.
                     </td>
                   </tr>
@@ -539,6 +556,12 @@ export default function ClientsPage() {
                         )}
                       </td>
                       <td className="px-3 py-3 text-zinc-500">{fmtDate(c.createdAt)}</td>
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-zinc-800">{fmtRelative(c.lastActiveAt)}</p>
+                        {c.lastActiveAt && (
+                          <p className="text-[11px] text-zinc-400">{fmtDate(c.lastActiveAt)}</p>
+                        )}
+                      </td>
                       <td className="px-3 py-3">
                         {period ? (
                           <div>
