@@ -21,6 +21,21 @@ function getRefreshToken(): string | null {
   return cleanToken(localStorage.getItem('admin_refresh_token'));
 }
 
+/** True when JWT is missing/invalid or past exp (with small skew). */
+function isJwtExpired(token: string | null, skewMs = 60_000): boolean {
+  if (!token) return true;
+  try {
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return true;
+    const json = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'));
+    const payload = JSON.parse(json) as { exp?: number };
+    if (!payload?.exp) return false;
+    return payload.exp * 1000 <= Date.now() + skewMs;
+  } catch {
+    return true;
+  }
+}
+
 export function setAdminTokens(token: string, refreshToken?: string | null) {
   if (typeof window === 'undefined') return;
   const access = cleanToken(token);
@@ -58,7 +73,7 @@ async function refreshAccessToken(): Promise<boolean> {
       const res = await fetch(`${API_BASE}/api/users/refresh-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({ refreshToken, client: 'admin' }),
       });
       const json = await res.json().catch(() => ({}));
       const nextToken = json?.token || json?.data?.token;
@@ -78,9 +93,10 @@ async function refreshAccessToken(): Promise<boolean> {
   return refreshInFlight;
 }
 
-/** Try to restore session from refresh token when access token is missing/expired. */
+/** Restore session; refresh when access JWT is missing or expired. */
 export async function ensureAdminSession(): Promise<boolean> {
-  if (getToken()) return true;
+  const access = getToken();
+  if (access && !isJwtExpired(access)) return true;
   if (!getRefreshToken()) return false;
   return refreshAccessToken();
 }
@@ -88,7 +104,6 @@ export async function ensureAdminSession(): Promise<boolean> {
 function isAuthExemptPath(path: string) {
   return (
     path.startsWith('/api/users/login') ||
-    path.startsWith('/api/users/verify-login-otp') ||
     path.startsWith('/api/users/refresh-token')
   );
 }
@@ -137,26 +152,22 @@ async function apiFetch<T = unknown>(
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
+/** Admin panel: password-only (no OTP). Backend skips OTP when client=admin / directLogin. */
 export async function loginWithPassword(email: string, password: string) {
-  return apiFetch('/api/users/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-    skipAuth: true,
-  });
-}
-
-export async function verifyLoginOtp(email: string, otp: string) {
   return apiFetch<{ token: string; refreshToken: string; user: Record<string, unknown> }>(
-    '/api/users/verify-login-otp',
+    '/api/users/login',
     {
       method: 'POST',
-      body: JSON.stringify({ email, otp }),
+      body: JSON.stringify({
+        email,
+        password,
+        client: 'admin',
+        directLogin: true,
+        skipOtp: true,
+      }),
       skipAuth: true,
     }
-  ).then((res) => {
-    console.log('Verify Login OTP raw response:', res);
-    return res;
-  });
+  );
 }
 
 // ─── Platform Admin ───────────────────────────────────────────────────────────
