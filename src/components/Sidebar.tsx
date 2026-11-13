@@ -81,6 +81,17 @@ const nav = [
       </svg>
     ),
   },
+  {
+    href: "/dashboard/backups",
+    label: "Backups",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3v12" />
+        <path d="M8 11l4 4 4-4" />
+        <path d="M4 19h16" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar() {

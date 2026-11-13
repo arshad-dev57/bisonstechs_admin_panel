@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Avatar, Badge, Breadcrumbs, Card, PageHeader } from "@/components/ui";
 import ClientSubscriptionPanel from "@/components/ClientSubscriptionPanel";
+import ClientManufacturingWorkflowPanel from "@/components/ClientManufacturingWorkflowPanel";
 import {
   getCompany,
   getCompanyActivity,
@@ -459,6 +460,13 @@ export default function ClientDetailPage() {
       </Card>
 
       <ClientSubscriptionPanel
+        detail={detail}
+        onUpdated={setDetail}
+        onMessage={setActionMessage}
+        onError={setError}
+      />
+
+      <ClientManufacturingWorkflowPanel
         detail={detail}
         onUpdated={setDetail}
         onMessage={setActionMessage}

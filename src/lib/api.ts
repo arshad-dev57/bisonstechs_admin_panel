@@ -237,6 +237,8 @@ export interface CompanyAdmin {
   businessDetails?: Record<string, unknown> | null;
 }
 
+export type ManufacturingWorkflow = 'STANDARD' | 'TEXTILE_WEAVING';
+
 export interface CompanyRow {
   id: string;
   name: string;
@@ -257,6 +259,7 @@ export interface CompanyRow {
   trialEndDate: string | null;
   subscriptionStartDate?: string | null;
   subscriptionEndDate: string | null;
+  manufacturingWorkflow?: ManufacturingWorkflow | string | null;
   createdAt: string;
   lastActiveAt?: string | null;
   _count: { users: number };
@@ -372,6 +375,19 @@ export async function updateCompanySubscription(id: string, body: UpdateCompanyS
   );
 }
 
+export async function updateCompanyManufacturingWorkflow(
+  id: string,
+  manufacturingWorkflow: ManufacturingWorkflow
+) {
+  return apiFetch<{ company: CompanyRow; capacity: CompanyCapacity }>(
+    `/api/platform/companies/${id}/manufacturing-workflow`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ manufacturingWorkflow }),
+    }
+  );
+}
+
 export interface PlatformUser {
   id: string;
   firstName: string;
@@ -477,4 +493,118 @@ export async function invalidateStorageCache() {
   return apiFetch('/api/admin/company-storage-usage/invalidate-cache', {
     method: 'POST',
   });
+}
+
+// ─── Backup Management ────────────────────────────────────────────────────────
+
+export interface BackupJobRow {
+  id: string;
+  backupType: 'FULL_DATABASE' | 'COMPANY';
+  status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RESTORING';
+  name: string;
+  fileName?: string | null;
+  fileSizeBytes?: number | null;
+  checksumSha256?: string | null;
+  progressPercent?: number;
+  progressMessage?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  expiresAt?: string | null;
+  companies?: { companyId: string; companyName: string }[];
+  isPreRestoreSnapshot?: boolean;
+}
+
+export interface BackupSummary {
+  totalBackups: number;
+  totalFullBackups: number;
+  totalStorageBytes: number;
+  lastSuccessfulBackupAt: string | null;
+  lastSuccessfulBackupId: string | null;
+  activeStatus: string;
+  storageProvider: string;
+  pgDumpAvailable: boolean;
+}
+
+export interface BackupSchedule {
+  id: string;
+  scheduleKey: string;
+  enabled: boolean;
+  frequency: string;
+  runAtUtc: string;
+  dayOfWeek: number | null;
+  retentionDays: number;
+  lastRunAt: string | null;
+  lastRunBackupId: string | null;
+  nextRunAt: string | null;
+}
+
+export async function listAdminBackups(opts?: { type?: string; limit?: number }) {
+  const qs = new URLSearchParams();
+  if (opts?.type) qs.set('type', opts.type);
+  if (opts?.limit) qs.set('limit', String(opts.limit));
+  const q = qs.toString() ? `?${qs.toString()}` : '';
+  return apiFetch<{ jobs: BackupJobRow[]; summary: BackupSummary }>(`/api/admin/backups${q}`);
+}
+
+export async function createFullBackup(name?: string) {
+  return apiFetch<{ job: BackupJobRow }>('/api/admin/backups/full', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function getAdminBackup(id: string) {
+  return apiFetch<{ job: BackupJobRow }>(`/api/admin/backups/${id}`);
+}
+
+export async function deleteAdminBackup(id: string) {
+  return apiFetch(`/api/admin/backups/${id}`, { method: 'DELETE' });
+}
+
+export async function getBackupSchedule() {
+  return apiFetch<{ schedule: BackupSchedule }>('/api/admin/backups/schedule');
+}
+
+export async function updateBackupSchedule(body: Partial<BackupSchedule>) {
+  return apiFetch<{ schedule: BackupSchedule }>('/api/admin/backups/schedule', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function runScheduledBackup(force = false) {
+  return apiFetch('/api/admin/backups/run-scheduled', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+}
+
+export async function requestFullRestore(id: string, confirmPhrase: string) {
+  return apiFetch(`/api/admin/backups/${id}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmPhrase }),
+  });
+}
+
+/** Browser download via authenticated fetch + blob (never exposes storage credentials). */
+export async function downloadAdminBackupToComputer(id: string, fileName?: string) {
+  if (!API_BASE) throw new Error('API_URL is not configured');
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/admin/backups/${id}/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json?.message || `Download failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName || `Bisonstechs_FullDB_${id.slice(0, 8)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
